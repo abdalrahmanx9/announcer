@@ -28,6 +28,8 @@ except ValueError:
     logger.error("OWNER_ID must be an integer.")
     OWNER_ID = 0
 
+SELLER_ROLE = os.getenv("SELLER_ROLE", "seller").lower()
+
 DB_NAME = "announcements.db"
 CAIRO_TZ = ZoneInfo("Africa/Cairo")
 
@@ -101,9 +103,12 @@ class EmbedBot(discord.Client):
 
     async def on_ready(self):
         logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
-        user = await self.fetch_user(OWNER_ID)
-        if user:
-            await self._send_usage_guide(user)
+        try:
+            user = await self.fetch_user(OWNER_ID)
+            if user:
+                await self._send_usage_guide(user)
+        except discord.NotFound:
+            logger.warning(f"OWNER_ID {OWNER_ID} is unknown to Discord - skipping usage guide DM")
 
     async def _send_usage_guide(self, user: discord.User):
         embed = discord.Embed(title="📢 D7M Announcer Utils", color=0x3498DB)
@@ -300,9 +305,22 @@ class EmbedBot(discord.Client):
 
         return config, "\n".join(outside_lines), "\n".join(embed_lines)
 
+    def _has_seller_role(self, member: discord.Member) -> bool:
+        return any(r.name.lower() == SELLER_ROLE for r in member.roles)
+
     async def on_message(self, message: discord.Message):
-        if message.author.id == self.user.id or message.author.id != OWNER_ID:
+        if message.author.id == self.user.id:
             return
+
+        is_owner = message.author.id == OWNER_ID
+        if not is_owner:
+            is_seller = any(
+                self._has_seller_role(m)
+                for g in self.guilds
+                if (m := g.get_member(message.author.id)) is not None
+            )
+            if not is_seller:
+                return
 
         if isinstance(message.channel, discord.DMChannel):
             await self._handle_dm_announcement(message)
